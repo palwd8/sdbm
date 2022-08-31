@@ -1,0 +1,147 @@
+#!/bin/sh 
+# SDBM - Simple Dmenu Bookmark Manager
+# Launches bookmarks stored in plaintext on a browser with the ability to also add,
+# delete and copy bookmark links to clipboard.
+# Bookmarks are organized within text files which correspond to the folder it is
+# in.
+# Author - Walid Palekar
+
+bookmarks_location="$HOME/docs/bookmarks"
+
+die() {
+    exit 1
+}
+
+action_browse() {
+    selfolder Bookmark:
+    if [ "$folder" = "../" ]; then
+        goback level1
+    else
+        selbookmark Bookmark:
+        if [ "$bookmark" = "../" ]; then
+            goback level2
+        else
+            geturl
+            xdg-open "$url"
+        fi
+    fi
+}
+
+action_add() {
+    new_bookmark=$(xclip -o)
+    selfolder Folder? add
+    if [ "$folder" = "Add a new folder? " ]; then
+        new_folder=$(echo "Creating a folder..." | dmenu -p "Title? ")
+        title=$(printf '%s\n%s' "" "$new_bookmark" | dmenu -p "Title? ")
+        echo "$new_bookmark" "$title" >> "$bookmarks_location/$new_folder"
+    elif [ "$folder" = "../" ]; then
+        goback level3
+    else
+        title=$(printf '%s\n%s' "" "$new_bookmark" | dmenu -p "Title? ")
+        echo "$new_bookmark" "$title" >> "$bookmarks_location/$folder"
+    fi
+}
+
+action_delete() {
+    selfolder Delete:
+    selbookmark Delete:
+    sed -i "/$bookmark/d" "$bookmarks_location/$folder"
+    notify-send "$bookmark deleted!"
+    if [ ! -s "$bookmarks_location/$folder" ]; then
+        rm -f "$bookmarks_location/$folder"
+        notify-send "$folder deleted!"
+    fi
+}
+
+action_copy() {
+    selfolder Bookmark:
+    selbookmark Bookmark:
+    geturl
+    printf '%s' "$url" | xclip -sel clip
+}
+
+action_menu() {
+    action=$(printf '%s\n%s\n%s\n%s' "1. Browse" "2. Add" "3. Delete" "4. Copy" \
+    | dmenu -p "Bookmarks: " -l 4)
+case $action in
+    "1. Browse")
+        action_browse
+        ;;
+    "2. Add")
+        action_add
+        ;;
+    "3. Delete")
+        action_delete
+        ;;
+    "4. Copy")
+        action_copy
+        ;;
+    *)
+        die 
+        ;;
+esac
+}
+
+main() {
+    firstchoice=$(printf '%s\n%s' "Actions..." "$(tac $bookmarks_location/* | cut -f 2- -d\ )" | dmenu -p "Bookmarks: " -l 20)
+    case $firstchoice in
+        "Actions...")
+            action_menu
+            ;;
+        [[:alnum:]]*)
+            folder=$(grep -Fl "$firstchoice" ${bookmarks_location}/*)
+            echo $folder
+            bookmark=$firstchoice
+            echo $bookmark
+            geturl quickmode
+            xdg-open "$url"
+            ;;
+        *)
+            die
+            ;;
+    esac
+}
+
+goback() {
+    if [ "$1" = "level1" ]; then
+        main
+    elif [ "$1" = "level2" ]; then
+        action_browse
+    elif [ "$1" = "level3" ]; then
+        action_menu
+    fi
+}
+
+selfolder() {
+    bookmarks_basename=$(basename $bookmarks_location)
+    folders=$(find "$bookmarks_location" -not -name "$bookmarks_basename" -printf "%f\n")
+    if [ "$2" = "add" ]; then
+        folder=$(printf '%s\n%s\n%s' "../" "Add a new folder? " "$folders" \
+            | dmenu -p "$1 " -l 20) 
+    else
+        folder=$(printf '%s\n%s' "../" "$folders" | dmenu -p "$1 " -l 20) 
+        if [ -z "$folder" ]; then
+            die  
+        fi
+    fi
+}
+
+selbookmark() {
+    folders=$(cat "$bookmarks_location/$folder" | cut -f 2- -d\ )
+    bookmark=$(printf '%s\n%s' "../" "$folders" | dmenu -p "$1 " -l 20) 
+    if [ -z "$bookmark" ]; then
+        die 
+    fi
+}
+
+geturl() {
+    if [ "$1" = "quickmode" ]; then
+        location=$folder
+    else
+        location=$bookmarks_location/$folder
+    fi
+    url=$(awk -v bookmark="$bookmark" '$0~bookmark { print $1; }' \
+    "$location")
+}
+
+main
